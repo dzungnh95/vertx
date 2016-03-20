@@ -15,30 +15,28 @@ import io.vertx.core.Handler;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.eventbus.*;
 
-public class Schedulers extends AbstractVerticle{	
+public class SchedulerVerticle extends AbstractVerticle{	
 	private Scheduler scheduler;
-	private EventBus eb;
+	
 	@Override
 	public void start(){
 		try {
 			this.scheduler = StdSchedulerFactory.getDefaultScheduler();
 			this.scheduler.start();
 			
-			eb = vertx.eventBus();
-			eb.consumer("scheduler", 
-					new Handler<Message<JsonObject>>(){
+			vertx.eventBus().consumer("scheduler", 
+					new Handler<Message<JsonObject>>() {
 
 				public void handle(Message<JsonObject> message) {
 					// TODO Auto-generated method stub
 					System.out.println("sche receive");
 					handleMessage(message);
-					/*eb.send(message.body().getString("triggerAddress"),
-							(new JsonObject()).put("ping", true));*/
+					//message.reply(arg0);
 				}
 				
 			});
 		} catch(SchedulerException e){
-			
+			e.printStackTrace();
 		}
 		System.out.println("Succesful Deployment, too");
 	}

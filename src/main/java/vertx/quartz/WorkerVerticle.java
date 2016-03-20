@@ -6,7 +6,7 @@ import io.vertx.core.eventbus.EventBus;
 import io.vertx.core.eventbus.Message;
 import io.vertx.core.json.JsonObject;
 
-public class Worker extends AbstractVerticle{
+public class WorkerVerticle extends AbstractVerticle{
 	private EventBus eb;
 	
 	public void start(){
