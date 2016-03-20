@@ -1,6 +1,7 @@
 package vertx.geocoding;
 
 import java.util.concurrent.TimeUnit;
+import static java.util.Arrays.asList;
 
 import org.bson.Document;
 import org.bson.types.ObjectId;
@@ -119,7 +120,7 @@ public class GeocodingVerticle extends AbstractVerticle {
 			return;
 		
 		// Lấy dữ liệu từ DB
-		doc = notGeoCol.find(new Document("status", false))
+		doc = notGeoCol.find(new Document("$or", asList(new Document("status", false), new Document("status", null))))
 				.limit(1).iterator().next();
 		ObjectId id = doc.get("_id", ObjectId.class);
 		String idString = id.toHexString();
