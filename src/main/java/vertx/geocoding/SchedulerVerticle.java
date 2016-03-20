@@ -26,13 +26,16 @@ public class SchedulerVerticle extends AbstractVerticle{
 	boolean isGeocoderDeployed = false;
 	String geocoderVerticleID;
 	
+	public static final short KEYLENGTH = 5;						//Key sẽ được add vào theo mảng, đây là độ dài mảng
+	
 	public void start() throws SchedulerException{
-		apiKey = new String[5];
+		apiKey = new String[KEYLENGTH];
 		apiKey[0] = "AIzaSyBgmIynJKwgSzl7QEhD4skoIxl2Vnv28WY";
 		apiKey[1] = "AIzaSyA5MacwhPs4ApHoO3qZoEPQgtsA_BAjR8U";
 		apiKey[2] = "AIzaSyCi9sE7WOGNDCSw6HxSD547hHF3XZlIC6w";
 		apiKey[3] = "AIzaSyDKeockc4HV3SPB0li6NAW0YVBQBKBcVcc";
 		apiKey[4] = "AIzaSyDJZ46nCwOzq0GQvekOfjEt498o88LmNvc";
+		
 		try {
 			this.scheduler = StdSchedulerFactory.getDefaultScheduler();
 			this.scheduler.start();
@@ -50,12 +53,18 @@ public class SchedulerVerticle extends AbstractVerticle{
 					@Override
 					public void handle(Message<JsonObject> mes) {
 						// TODO Auto-generated method stub
+						
+						// Handle khi geocoder cần đổi key
 						if (mes.body().getString("type").equals("need change key")){
 							switchKey(mes);
 						}
+						
+						// Cập nhật trạng thái khi geocoder stop
 						else if (mes.body().getString("type").equals("geocoder undeployed")){
 							isGeocoderDeployed = false;
 						}
+						
+						// Khi nhận được tín hiệu ping lúc 12h đêm, sẽ thực hiện reset lại key
 						else if (mes.body().getString("type").equals("daily switch")){
 							dailySwitch();
 						}

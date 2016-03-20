@@ -44,9 +44,6 @@ public class GeocodingVerticle extends AbstractVerticle {
 	private Label provinceLabel;
 	private long timerID;
 	
-	//This ones is for test
-	private int indexOverQueryException = 0;
-	
 	@SuppressWarnings("deprecation")
 	public void start(Future<Void> fut) throws Exception{
 		
@@ -74,18 +71,19 @@ public class GeocodingVerticle extends AbstractVerticle {
 							resetApiKey(message.body().getString("api key"));
 						}
 					});
+		//Thực hiện việc geocode
 		timerID = this.setVertxTimer();
 	}
 	
 	public void stop() {
 		eb.send("scheduler", new JsonObject().put("type", "geocoder undeployed"));
 		mongoClient.close();
-		graphDb.shutdown();
+ 		graphDb.shutdown();
 	}
 	
+	//Hàm thực hiện tuần hoàn việc geocode
 	public long setVertxTimer(){
 		return vertx.setPeriodic(200, new Handler<Long>(){
-
 			@Override
 			public void handle(Long arg0) {
 				// TODO Auto-generated method stub
@@ -96,7 +94,6 @@ public class GeocodingVerticle extends AbstractVerticle {
 					e.printStackTrace();
 				}
 			}
-			
 		});
 	}
 	
@@ -113,9 +110,7 @@ public class GeocodingVerticle extends AbstractVerticle {
 	public void resetApiKey(String apiKey){
 			context.setApiKey(apiKey);
 	}
-	
-	
-	
+
 	//Thực hiện geocode, nhận vào một String dạng "21,000546, 65,154864"
 	public void reverseGeocoding() throws Exception {
 		//Neu dang doi key thi return luon
@@ -123,15 +118,14 @@ public class GeocodingVerticle extends AbstractVerticle {
 		if(isChangingKey)
 			return;
 		
-		doc = notGeoCol.find().limit(1).iterator().next();
+		// Lấy dữ liệu từ DB
+		doc = notGeoCol.find(new Document("status", false))
+				.limit(1).iterator().next();
 		ObjectId id = doc.get("_id", ObjectId.class);
 		String idString = id.toHexString();
 		
-		this.indexOverQueryException++;
-		
+		//Bắt đầu geocode
 		try {
-			if(this.indexOverQueryException==1000)
-				throw new OverQueryLimitException(null);
 			double lat = Double.valueOf(doc.getString("geo_lat"));
 			double lng = Double.valueOf(doc.getString("geo_long"));
 			
@@ -140,12 +134,10 @@ public class GeocodingVerticle extends AbstractVerticle {
 						.latlng(new LatLng(lat, lng))
 						.await();
 			
+			//Geocoding result là một mảng nên ta sẽ add vào từng phần tử của mảng đó
 			for(int i = 0; i < results.length; i++){
 				this.addToNeo4j(results[i], idString);
 			}
-			
-			//gson.toJson(results, TypeToken.);
-			//writer.close();
 		} catch (NullPointerException e){
 			return;
 		} catch (OverQueryLimitException e){
@@ -163,51 +155,17 @@ public class GeocodingVerticle extends AbstractVerticle {
 									context.setApiKey(((JsonObject)res.result().body()).getString("api key"));
 									isChangingKey = false;
 									timerID = setVertxTimer();
-									this.indexOverQueryException = 0;
-									
-									//Just for test
-									System.out.println("CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ ((JsonObject)res.result().body()).getString("api key")
-											+ ((JsonObject)res.result().body()).getString("api key")
-											+ ((JsonObject)res.result().body()).getString("api key")
-											+ ((JsonObject)res.result().body()).getString("api key")
-											+ ((JsonObject)res.result().body()).getString("api key")
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n"
-											+ "CHANGE KEY \n");
 								}
 								else this.stop();
 						});
 			}
 			return;
 		} catch (OverDailyLimitException e) {
+			// Nếu hết quota của một ngày thì sẽ dừng lại luôn, để scheduler deploy lại sau
 			this.stop();
 			return;
 		} catch (NumberFormatException e) {
+			// Nếu collection bị lỗi sẽ delete khỏi db
 			notGeoCol.deleteOne(new Document("_id", id));
 			return;
 		}
@@ -279,7 +237,7 @@ public class GeocodingVerticle extends AbstractVerticle {
 				sublocal1 = this.searchOrCreateNode(admlv2, res, AddressComponentType.SUBLOCALITY_LEVEL_1);
 				route = this.searchOrCreateNode(sublocal1, res, AddressComponentType.ROUTE);
 				
-				//Tạo một lấ
+				//Tạo một lá và add vào cây
 				Node newNode = graphDb.createNode(label);
 				newNode.setProperty("geo_lat", res.geometry.location.lat);
 				newNode.setProperty("id", idString);
@@ -289,6 +247,7 @@ public class GeocodingVerticle extends AbstractVerticle {
 				route.createRelationshipTo(newNode, RelTypes.INCLUDE);
 				newNode.setProperty("geo_long", res.geometry.location.lng);
 			} catch (NullPointerException e) {
+				//Nếu một trong các mức của geocoding result bị thiếu, result đó sẽ bị bỏ qua ngay
 				tx.failure();
 				return;
 			}
