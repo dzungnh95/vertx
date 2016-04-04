@@ -32,6 +32,30 @@
   		<groupId>org.neo4j</groupId>
   		<artifactId>neo4j</artifactId>
   	</dependency>
+  	<dependency>
+  		<groupId>com.thinkaurelius.titan</groupId>
+  		<artifactId>titan-core</artifactId>
+  	</dependency>
+  	<dependency>
+  		<groupId>com.thinkaurelius.titan</groupId>
+  		<artifactId>titan-es</artifactId>
+  	</dependency>
+  	<dependency>
+  		<groupId>com.thinkaurelius.titan</groupId>
+  		<artifactId>titan-cassandra</artifactId>
+  	</dependency>
+  	<dependency>
+  		<groupId>junit</groupId>
+  		<artifactId>junit</artifactId>
+  	</dependency>
+  	<dependency>
+  		<groupId>org.apache.tinkerpop</groupId>
+  		<artifactId>gremlin-core</artifactId>
+  	</dependency>
+  	<dependency>
+  		<groupId>org.apache.tinkerpop</groupId>
+  		<artifactId>tinkergraph-gremlin</artifactId>
+  	</dependency>
   </dependencies>
   <dependencyManagement>
   	<dependencies>
@@ -70,6 +94,36 @@
   			<artifactId>neo4j</artifactId>
   			<version>2.3.2</version>
   		</dependency>
+  		<dependency>
+  			<groupId>com.thinkaurelius.titan</groupId>
+  			<artifactId>titan-core</artifactId>
+  			<version>1.0.0</version>
+  		</dependency>
+  		<dependency>
+  			<groupId>junit</groupId>
+  			<artifactId>junit</artifactId>
+  			<version>4.10</version>
+  		</dependency>
+  		<dependency>
+  			<groupId>com.thinkaurelius.titan</groupId>
+  			<artifactId>titan-es</artifactId>
+  			<version>1.0.0</version>
+  		</dependency>
+  		<dependency>
+  			<groupId>com.thinkaurelius.titan</groupId>
+  			<artifactId>titan-cassandra</artifactId>
+  			<version>1.0.0</version>
+  		</dependency>
+  		<dependency>
+  			<groupId>org.apache.tinkerpop</groupId>
+  			<artifactId>gremlin-core</artifactId>
+  			<version>3.0.2-incubating</version>
+  		</dependency>
+  		<dependency>
+  			<groupId>org.apache.tinkerpop</groupId>
+  			<artifactId>tinkergraph-gremlin</artifactId>
+  			<version>3.0.2-incubating</version>
+  		</dependency>
   	</dependencies>
   </dependencyManagement>
   <build>
@@ -87,4 +141,10 @@
            </plugins>
       </pluginManagement>
  </build>
+ <exclusions>
+    <exclusion>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-log4j12</artifactId>
+    </exclusion>
+  </exclusions>
 </project>

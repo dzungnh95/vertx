@@ -1,18 +1,15 @@
 package vertx.geocoding;
 
-import java.util.concurrent.TimeUnit;
 import static java.util.Arrays.asList;
 
+import java.util.concurrent.TimeUnit;
+
+import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
+import org.apache.tinkerpop.gremlin.process.traversal.util.FastNoSuchElementException;
+import org.apache.tinkerpop.gremlin.structure.T;
+import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.bson.Document;
 import org.bson.types.ObjectId;
-import org.neo4j.graphdb.Direction;
-import org.neo4j.graphdb.DynamicLabel;
-import org.neo4j.graphdb.GraphDatabaseService;
-import org.neo4j.graphdb.Label;
-import org.neo4j.graphdb.Node;
-import org.neo4j.graphdb.Transaction;
-import org.neo4j.graphdb.factory.GraphDatabaseFactory;
-import org.neo4j.graphdb.traversal.Evaluators;
 
 import com.google.maps.GeoApiContext;
 import com.google.maps.GeocodingApi;
@@ -25,6 +22,9 @@ import com.google.maps.model.LatLng;
 import com.mongodb.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.thinkaurelius.titan.core.TitanFactory;
+import com.thinkaurelius.titan.core.TitanGraph;
+import com.thinkaurelius.titan.core.TitanTransaction;
 
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Future;
@@ -40,28 +40,28 @@ public class GeocodingVerticle extends AbstractVerticle {
 	private MongoClient mongoClient;
 	private MongoDatabase db;
 	private MongoCollection<Document> notGeoCol;
-	private GraphDatabaseService graphDb;
-	private Label label;
-	private Label provinceLabel;
 	private long timerID;
+	private TitanGraph graph;
+	private GraphTraversalSource g;
+	private Vertex vietNamVertex;
+	private boolean status;
 	
-	@SuppressWarnings("deprecation")
+	
 	public void start(Future<Void> fut) throws Exception{
-		
-		label = DynamicLabel.label("geo");										//label chung cho tất cả các nút
-		provinceLabel = DynamicLabel.label("province");							//label cho mức Tỉnh
-		graphDb = new GraphDatabaseFactory().newEmbeddedDatabase("GeoDb");		
+		graph = TitanFactory.open("vertxgeocoding.properties");
+		vietNamVertex = graph.traversal().V().has("name", "Vietnam").next();
+		/*label = DynamicLabel.label("geo");										
+		provinceLabel = DynamicLabel.label("province");							
+		graphDb = new GraphDatabaseFactory().newEmbeddedDatabase("GeoDb");*/		
 		mongoClient = new MongoClient();
 		db = mongoClient.getDatabase("test");
-		notGeoCol = db.getCollection("DungTestMongo");							//DB có sẵn cần geocode
+		notGeoCol = db.getCollection("DungTestMongo");							
 		db.getCollection("doneDB");
 		db.getCollection("failDB");
 
-		//Init context for geocoding context
 		initContext();
 		this.context.setApiKey(this.config().getString("key"));
 		
-		//Get on the event bus
 		eb = vertx.eventBus();
 		eb.consumer("geocoder", 
 				new Handler<Message<JsonObject>>(){
@@ -72,17 +72,16 @@ public class GeocodingVerticle extends AbstractVerticle {
 							resetApiKey(message.body().getString("api key"));
 						}
 					});
-		//Thực hiện việc geocode
 		timerID = this.setVertxTimer();
 	}
 	
 	public void stop() {
 		eb.send("scheduler", new JsonObject().put("type", "geocoder undeployed"));
 		mongoClient.close();
- 		graphDb.shutdown();
+		graph.close();
+ 		//graphDb.shutdown();
 	}
 	
-	//Hàm thực hiện tuần hoàn việc geocode
 	public long setVertxTimer(){
 		return vertx.setPeriodic(200, new Handler<Long>(){
 			@Override
@@ -107,49 +106,41 @@ public class GeocodingVerticle extends AbstractVerticle {
 				.setRetryTimeout(1, TimeUnit.SECONDS);
 	}
 	
-	//Đổi key sau mỗi lần over query limit
 	public void resetApiKey(String apiKey){
 			context.setApiKey(apiKey);
 	}
 
-	//Thực hiện geocode, nhận vào một String dạng "21,000546, 65,154864"
 	public void reverseGeocoding() throws Exception {
-		//Neu dang doi key thi return luon
 		Document doc;
 		if(isChangingKey)
 			return;
 		
-		// Lấy dữ liệu từ DB
 		doc = notGeoCol.find(new Document("$or", asList(new Document("status", false), new Document("status", null))))
 				.limit(1).iterator().next();
 		ObjectId id = doc.get("_id", ObjectId.class);
 		String idString = id.toHexString();
 		
-		//Bắt đầu geocode
 		try {
 			double lat = Double.valueOf(doc.getString("geo_lat"));
 			double lng = Double.valueOf(doc.getString("geo_long"));
 			
-			//Gửi request và nhận lại một mảng
 			GeocodingResult[] results = GeocodingApi.newRequest(context)
 						.latlng(new LatLng(lat, lng))
 						.await();
 			
-			//Geocoding result là một mảng nên ta sẽ add vào từng phần tử của mảng đó
 			for(int i = 0; i < results.length; i++){
-				this.addToNeo4j(results[i], idString);
+				this.addToTitan(results[i], idString, status);
+				if (status) 
+					notGeoCol.findOneAndUpdate(new Document("_id", id), 
+							new Document("$set", new Document("status", true)));
 			}
 		} catch (NullPointerException e){
 			return;
 		} catch (OverQueryLimitException e){
-			//Neu dang doi key thi bo qua luon
 			if(!isChangingKey){
 				vertx.cancelTimer(timerID);
 				isChangingKey = true;
 				
-				//Gửi scheduler yêu cầu lấy key
-				//Nếu lấy được key thì set lại, khởi động lại timer
-				//Nếu không thì stop
 				eb.send("scheduler", new JsonObject().put("type", "need change key"),
 						res -> {
 								if (res.succeeded()){
@@ -162,21 +153,16 @@ public class GeocodingVerticle extends AbstractVerticle {
 			}
 			return;
 		} catch (OverDailyLimitException e) {
-			// Nếu hết quota của một ngày thì sẽ dừng lại luôn, để scheduler deploy lại sau
 			this.stop();
 			return;
 		} catch (NumberFormatException e) {
-			// Nếu collection bị lỗi sẽ delete khỏi db
 			notGeoCol.deleteOne(new Document("_id", id));
 			return;
 		}
-		notGeoCol.findOneAndUpdate(new Document("_id", id), 
-				new Document("$set", new Document("status", true)));
 		System.out.println("Done something");
 	}
 	
 	public AddressComponent getComponent(GeocodingResult res, AddressComponentType type) {
-		//Tìm kiếm thông tin trong geocoding result
 		for (AddressComponent component : res.addressComponents){
 			for (AddressComponentType componentType : component.types){
 				if(componentType == type)
@@ -186,9 +172,22 @@ public class GeocodingVerticle extends AbstractVerticle {
 		throw new NullPointerException(null);
 	}
 	
-	public Node searchOrCreateNode(Node source, GeocodingResult res, AddressComponentType type){
-		//Tìm kiếm theo chiều rộng nút có nội dung như trong result
-		try (Transaction tx = graphDb.beginTx()){
+	public Vertex searchOrCreateNode(Vertex source, GeocodingResult res, AddressComponentType type){
+		TitanTransaction tx = graph.newTransaction();
+		String componentName = this.getComponent(res, type).longName;
+		Vertex expected;
+		try {
+			expected = g.V(source.id()).out("include").has("name", componentName).next();
+		} catch (FastNoSuchElementException e) {
+			expected = tx.addVertex(T.label, type.toString(), "name", componentName);
+			source.addEdge("include", expected);
+			tx.commit();
+			return expected;
+		}
+		
+		tx.commit();
+		return expected;
+		/*try (Transaction tx = graphDb.beginTx()){
 			for(Node childNode : graphDb.traversalDescription()
 									.breadthFirst()
 									.evaluator(Evaluators.atDepth(1))
@@ -203,7 +202,6 @@ public class GeocodingVerticle extends AbstractVerticle {
 			tx.success();
 		}
 		
-		//Nếu không tìm thấy thì tạo nút mới có nội dung cần tìm
 		Node newNode;
 		try (Transaction tx = graphDb.beginTx()){
 			newNode = graphDb.createNode(label);
@@ -213,16 +211,38 @@ public class GeocodingVerticle extends AbstractVerticle {
 			tx.success();
 		}
 		
-		return newNode;
+		return newNode;*/
 	}
 	
-	public void addToNeo4j(GeocodingResult res, String idString){
-		//Dang o muc county
-		try (Transaction tx = graphDb.beginTx())
+	public void addToTitan(GeocodingResult res, String idString, boolean status){
+		TitanTransaction tx = graph.newTransaction();
+		g = graph.traversal();
+		try {
+			Vertex province, admlv2, sublocal1, route;
+			province = this.searchOrCreateNode(vietNamVertex, res, AddressComponentType.ADMINISTRATIVE_AREA_LEVEL_1);
+			admlv2 = this.searchOrCreateNode(province, res, AddressComponentType.ADMINISTRATIVE_AREA_LEVEL_2);
+			sublocal1 = this.searchOrCreateNode(admlv2, res, AddressComponentType.SUBLOCALITY_LEVEL_1);
+			route = this.searchOrCreateNode(sublocal1, res, AddressComponentType.ROUTE);
+			
+			Vertex leaf = tx.addVertex(T.label, "place", "mongoID", idString);
+			String routeNumber = getComponent(res, AddressComponentType.STREET_NUMBER).longName;
+			if (routeNumber != null)
+				leaf.property("route number", routeNumber);
+			leaf.property("lat", res.geometry.location.lat, "long", res.geometry.location.lng);
+			route.addEdge("include", leaf);
+		} catch (NullPointerException e) {
+			tx.rollback();
+			status = false;
+			return;
+		}
+		
+		tx.commit();
+		status = true;
+		return;
+		/*try (Transaction tx = graphDb.beginTx())
 		{
 			try {
 				Node province, admlv2, sublocal1, route;
-				//Tìm trước nút chưa thông tin về tỉnh. Đây là nút có mức ADMINISTRATIVE_AREA_LEVEL_1
 				province = graphDb.findNode(provinceLabel
 						, "name", this.getComponent(res, AddressComponentType.ADMINISTRATIVE_AREA_LEVEL_1).longName);
 				if (province == null){
@@ -233,12 +253,10 @@ public class GeocodingVerticle extends AbstractVerticle {
 					province = provNode;
 				}
 				
-				//Tiếp tục đi theo các mức đến mức Đường (ROUTE)
 				admlv2 = this.searchOrCreateNode(province, res, AddressComponentType.ADMINISTRATIVE_AREA_LEVEL_2);
 				sublocal1 = this.searchOrCreateNode(admlv2, res, AddressComponentType.SUBLOCALITY_LEVEL_1);
 				route = this.searchOrCreateNode(sublocal1, res, AddressComponentType.ROUTE);
 				
-				//Tạo một lá và add vào cây
 				Node newNode = graphDb.createNode(label);
 				newNode.setProperty("geo_lat", res.geometry.location.lat);
 				newNode.setProperty("id", idString);
@@ -248,11 +266,10 @@ public class GeocodingVerticle extends AbstractVerticle {
 				route.createRelationshipTo(newNode, RelTypes.INCLUDE);
 				newNode.setProperty("geo_long", res.geometry.location.lng);
 			} catch (NullPointerException e) {
-				//Nếu một trong các mức của geocoding result bị thiếu, result đó sẽ bị bỏ qua ngay
 				tx.failure();
 				return;
 			}
 			tx.success();
-		}
+		}*/
 	}
 }
